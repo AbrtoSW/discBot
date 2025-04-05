@@ -66,23 +66,6 @@ def export_cookies_from_browser():
         print(f"Error during cookie export: {e}")
         return False
 
-
-@bot.command(name='uploadcookie')
-async def upload_cookie(ctx):
-    """Upload a cookies.txt file manually."""
-    if not ctx.message.attachments:
-        await ctx.send("Please attach a `cookies.txt` file. Export it from your browser with 'Get cookies.txt LOCALLY'.")
-        return
-    attachment = ctx.message.attachments[0]
-    if not attachment.filename.endswith('.txt'):
-        await ctx.send("Please upload a `.txt` file (e.g., `cookies.txt`).")
-        return
-    # Ensure /data exists before saving
-    os.makedirs('/data', exist_ok=True)
-    await attachment.save(COOKIE_FILE)
-    await ctx.send("✅ Cookies file uploaded successfully! Try your command again.")
-
-
 # Generate browser-like headers
 def get_browser_headers():
     return {
