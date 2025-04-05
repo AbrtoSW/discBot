@@ -1,0 +1,16 @@
+services:
+  - type: worker
+    name: discord-music-bot
+    env: python
+    repo: <your-repo-url>
+    buildCommand: |
+      apt-get update && apt-get install -y ffmpeg
+      pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+    disks:
+      - name: data
+        mountPath: /data
+        sizeGB: 1
