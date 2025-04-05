@@ -4,8 +4,11 @@ import yt_dlp as youtube_dl
 import asyncio
 import os
 from collections import deque
-import webserver  # Assuming this keeps the bot alive
+import webserver
 from dotenv import load_dotenv
+import json
+import sys
+import platform
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -17,12 +20,68 @@ music_queues = {}
 now_playing = {}
 playlist_info = {}
 loop_modes = {}
-bot_config = {}
+bot_config = {}  # New: Store PO Token and other config
 
 load_dotenv()
 
 TOKEN = os.environ.get('DISCORD_TOKEN')
-COOKIE_FILE = '/data/youtube_cookies.txt'  # Persistent path if using a disk on Render
+COOKIE_FILE = '/data/youtube_cookies.txt'
+# Cookie file path setup
+def get_cookie_file_path():
+    """Determine the appropriate path for storing cookies based on OS"""
+    if not os.path.exists('data'):
+        os.makedirs('data')
+    return os.path.join('data', 'youtube_cookies.txt')
+
+
+
+# Export cookies function
+def export_cookies_from_browser():
+    """Try to export cookies from browser to file"""
+    try:
+        print("Attempting to export cookies from browser...")
+        browsers = ['chrome', 'firefox', 'edge', 'safari', 'opera']
+        if platform.system() == 'Darwin':  # macOS
+            priority_browsers = ['safari', 'chrome', 'firefox']
+        elif platform.system() == 'Windows':
+            priority_browsers = ['edge', 'chrome', 'firefox']
+        else:  # Linux and others
+            priority_browsers = ['firefox', 'chrome']
+        for browser in priority_browsers:
+            try:
+                with youtube_dl.YoutubeDL({
+                    'quiet': True,
+                    'cookiesfrombrowser': (browser,),
+                    'cookiefile': COOKIE_FILE
+                }) as ydl:
+                    ydl.extract_info("https://www.youtube.com/watch?v=jNQXAC9IVRw", download=False, process=False)
+                    print(f"Successfully exported cookies from {browser}")
+                    return True
+            except Exception as e:
+                print(f"Failed to export cookies from {browser}: {e}")
+                continue
+        print("Could not export cookies from any browser")
+        return False
+    except Exception as e:
+        print(f"Error during cookie export: {e}")
+        return False
+
+
+@bot.command(name='uploadcookie')
+async def upload_cookie(ctx):
+    """Upload a cookies.txt file manually."""
+    if not ctx.message.attachments:
+        await ctx.send("Please attach a `cookies.txt` file. Export it from your browser with 'Get cookies.txt LOCALLY'.")
+        return
+    attachment = ctx.message.attachments[0]
+    if not attachment.filename.endswith('.txt'):
+        await ctx.send("Please upload a `.txt` file (e.g., `cookies.txt`).")
+        return
+    # Ensure /data exists before saving
+    os.makedirs('/data', exist_ok=True)
+    await attachment.save(COOKIE_FILE)
+    await ctx.send("✅ Cookies file uploaded successfully! Try your command again.")
+
 
 # Generate browser-like headers
 def get_browser_headers():
@@ -30,18 +89,45 @@ def get_browser_headers():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
         'Referer': 'https://www.youtube.com/',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
+        'sec-ch-ua': '"Chromium";v="120", "Google Chrome";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
     }
 
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
-    if not os.path.exists('/data'):  # Ensure data directory exists if disk is mounted
-        os.makedirs('/data', exist_ok=True)
+    # Create /data directory if it doesn’t exist
+    os.makedirs('/data', exist_ok=True)  # Safe creation, won’t raise if exists
     if not os.path.exists(COOKIE_FILE) or os.path.getsize(COOKIE_FILE) == 0:
         print("No cookies file found. Upload one with !uploadcookie or set a PO Token with !potoken.")
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="!help"))
 
+@bot.command(name='uploadcookie')
+async def upload_cookie(ctx):
+    """Upload a cookies.txt file manually."""
+    if not ctx.message.attachments:
+        await ctx.send("Please attach a `cookies.txt` file. Export it from your browser with 'Get cookies.txt LOCALLY'.")
+        return
+    attachment = ctx.message.attachments[0]
+    if not attachment.filename.endswith('.txt'):
+        await ctx.send("Please upload a `.txt` file (e.g., `cookies.txt`).")
+        return
+    # Ensure /data exists before saving
+    os.makedirs('/data', exist_ok=True)
+    await attachment.save(COOKIE_FILE)
+    await ctx.send("✅ Cookies file uploaded successfully! Try your command again.")
+
+# New: Robust audio source extraction with retries
 async def get_audio_source(url, retries=3):
     ffmpeg_options = {
         'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
@@ -57,6 +143,7 @@ async def get_audio_source(url, retries=3):
             await asyncio.sleep(1)
 
 async def extract_info(url):
+    """Extract information from a YouTube URL or search query."""
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
@@ -109,6 +196,7 @@ async def extract_info(url):
         }
 
 async def play_next(guild_id):
+    """Play the next song in the queue or repeat based on loop mode."""
     voice_client = voice_clients.get(guild_id)
     if not voice_client:
         return
@@ -171,7 +259,7 @@ async def play_next(guild_id):
                     print(f"Failed to reconnect: {e}")
                     return
 
-        source = await get_audio_source(song['url'])
+        source = await get_audio_source(song['url'])  # Updated to use retry logic
 
         def after_playback(error):
             if error:
@@ -197,6 +285,7 @@ async def play_next(guild_id):
         asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop)
 
 async def play_music(ctx, url, queue_if_playing=False):
+    """Play music from a URL or search query."""
     try:
         if ctx.author.voice:
             channel = ctx.author.voice.channel
@@ -226,9 +315,11 @@ async def play_music(ctx, url, queue_if_playing=False):
         if not info['url']:
             await ctx.send(f"Failed to extract information: {info['title']}")
             if "confirm you're not a bot" in info['title'] or "Sign in" in info['title']:
-                await ctx.send(
-                    "YouTube requires authentication. Upload a cookies file with `!uploadcookie` or set a PO Token with `!potoken`."
-                )
+                await ctx.send("YouTube is asking for verification. I'll try to refresh the authentication...")
+                if export_cookies_from_browser():
+                    await ctx.send("Authentication refreshed. Please try again!")
+                else:
+                    await ctx.send("Couldn't refresh authentication automatically. Use `!cookie` or `!potoken`.")
             return
 
         if info['is_playlist']:
@@ -260,27 +351,25 @@ async def play_music(ctx, url, queue_if_playing=False):
         await ctx.send(f"Error: {str(e)}")
         print(f"Error details: {str(e)}")
 
-@bot.command(name='uploadcookie')
-async def upload_cookie(ctx):
-    """Upload a cookies.txt file manually."""
-    if not ctx.message.attachments:
-        await ctx.send("Please attach a `cookies.txt` file. Export it from your browser with 'Get cookies.txt LOCALLY'.")
-        return
-    attachment = ctx.message.attachments[0]
-    if not attachment.filename.endswith('.txt'):
-        await ctx.send("Please upload a `.txt` file (e.g., `cookies.txt`).")
-        return
-    await attachment.save(COOKIE_FILE)
-    await ctx.send("✅ Cookies file uploaded successfully! Try your command again.")
-
+# New: Command to set PO Token
 @bot.command(name='potoken')
 async def set_po_token(ctx, token: str):
     """Set a YouTube PO Token for downloads."""
     bot_config['po_token'] = token
     await ctx.send("✅ PO Token set successfully! Try your command again.")
 
+@bot.command(name='cookie')
+async def cookie_command(ctx):
+    """Manually update YouTube cookies."""
+    await ctx.send("Attempting to refresh YouTube authentication...")
+    if export_cookies_from_browser():
+        await ctx.send("✅ Successfully refreshed YouTube authentication!")
+    else:
+        await ctx.send("❌ Failed to refresh. Log in to YouTube in your browser or use `!potoken`.")
+
 @bot.command(name='queue', aliases=['q'])
 async def queue(ctx):
+    """Shows the current music queue."""
     if ctx.guild.id not in music_queues or not music_queues[ctx.guild.id]:
         await ctx.send("The queue is empty.")
         return
@@ -314,8 +403,10 @@ async def queue(ctx):
         )
     await ctx.send(embed=embed)
 
+# New: Command to remove a song from the queue
 @bot.command(name='remove')
 async def remove(ctx, index: int):
+    """Remove a song from the queue by index."""
     if ctx.guild.id not in music_queues or not music_queues[ctx.guild.id]:
         await ctx.send("The queue is empty.")
         return
@@ -328,6 +419,7 @@ async def remove(ctx, index: int):
 
 @bot.command(name='loop')
 async def loop(ctx, mode: str = None):
+    """Toggles loop mode: off, song, queue."""
     guild_id = ctx.guild.id
     valid_modes = ['off', 'song', 'queue']
     if mode:
@@ -345,6 +437,7 @@ async def loop(ctx, mode: str = None):
 
 @bot.command(name='play')
 async def play(ctx, *, search: str):
+    """Plays a song from YouTube immediately."""
     if search.startswith("http"):
         url = search
     else:
@@ -353,6 +446,7 @@ async def play(ctx, *, search: str):
 
 @bot.command(name='add')
 async def add(ctx, *, search: str):
+    """Adds a song to the queue."""
     if search.startswith("http"):
         url = search
     else:
@@ -361,6 +455,7 @@ async def add(ctx, *, search: str):
 
 @bot.command(name='pause')
 async def pause(ctx):
+    """Pauses the currently playing song."""
     if ctx.guild.id in voice_clients:
         voice_client = voice_clients[ctx.guild.id]
         if voice_client.is_playing():
@@ -373,6 +468,7 @@ async def pause(ctx):
 
 @bot.command(name='resume')
 async def resume(ctx):
+    """Resumes the currently paused song."""
     if ctx.guild.id in voice_clients:
         voice_client = voice_clients[ctx.guild.id]
         if voice_client.is_paused():
@@ -385,6 +481,7 @@ async def resume(ctx):
 
 @bot.command(name='stop')
 async def stop(ctx):
+    """Stops playing, clears the queue, and disconnects."""
     if ctx.guild.id in voice_clients:
         voice_client = voice_clients[ctx.guild.id]
         if ctx.guild.id in music_queues:
@@ -405,6 +502,7 @@ async def stop(ctx):
 
 @bot.command(name='skip', aliases=['next'])
 async def skip(ctx):
+    """Skips to the next song in the queue."""
     if ctx.guild.id in voice_clients:
         voice_client = voice_clients[ctx.guild.id]
         if voice_client.is_playing() or voice_client.is_paused():
@@ -417,6 +515,7 @@ async def skip(ctx):
 
 @bot.command(name='clear')
 async def clear(ctx):
+    """Clears the music queue and stops current playback."""
     guild_id = ctx.guild.id
     queue_cleared = False
     if guild_id in music_queues:
@@ -436,6 +535,7 @@ async def clear(ctx):
 
 @bot.command(name='np', aliases=['nowplaying'])
 async def now_playing_cmd(ctx):
+    """Shows the currently playing song."""
     if ctx.guild.id in now_playing:
         song = now_playing[ctx.guild.id]
         embed = discord.Embed(
@@ -454,6 +554,7 @@ async def now_playing_cmd(ctx):
 
 @bot.command(name='commands', aliases=['help', 'cmds'])
 async def commands_list(ctx):
+    """Shows all available commands."""
     embed = discord.Embed(
         title="Music Bot Commands",
         description="Here are all the available commands:",
@@ -467,19 +568,20 @@ async def commands_list(ctx):
         ("!stop", "Stops playing and clears the queue"),
         ("!skip or !next", "Skips to the next song"),
         ("!queue or !q", "Shows the current queue"),
-        ("!remove [index]", "Removes a song from the queue"),
+        ("!remove [index]", "Removes a song from the queue by index"),
         ("!clear", "Clears the music queue"),
         ("!loop", "Toggles loop modes: song → queue → off"),
-        ("!loop [mode]", "Sets loop mode: 'song', 'queue', 'off'"),
+        ("!loop [mode]", "Sets loop mode: 'song', 'queue', or 'off'"),
         ("!np", "Shows the currently playing song"),
-        ("!uploadcookie", "Uploads a YouTube cookies file"),
+        ("!cookie", "Refreshes YouTube authentication"),
         ("!potoken [token]", "Sets a YouTube PO Token"),
-        ("!commands", "Shows this help message")
+        ("!commands or !cmds", "Shows this help message")
     ]
     for command, description in commands_list:
         embed.add_field(name=command, value=description, inline=False)
     await ctx.send(embed=embed)
 
+# New: Global error handler
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandInvokeError):
@@ -500,9 +602,10 @@ async def on_voice_state_update(member, before, after):
             loop_modes.pop(guild_id, None)
             voice_clients.pop(guild_id, None)
 
-if __name__ == "__main__":
-    if not TOKEN:
-        print("Error: No DISCORD_TOKEN found in environment variables")
-        sys.exit(1)
-    webserver.keep_alive()
+webserver.keep_alive()
+
+if TOKEN:
     bot.run(TOKEN)
+else:
+    print("Error: No DISCORD_TOKEN found in environment variables")
+    print("Please set your token in a .env file or environment variables")
