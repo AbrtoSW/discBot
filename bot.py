@@ -23,7 +23,7 @@ loop_modes = {}
 
 load_dotenv()
 
-TOKEN = os.getenv('DISCORD_TOKEN')
+TOKEN = os.environ['DISCORD_TOKEN']
 
 @bot.event
 async def on_ready():
