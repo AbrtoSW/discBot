@@ -4,7 +4,6 @@ import yt_dlp as youtube_dl
 import asyncio
 import os
 from collections import deque
-import webserver
 from dotenv import load_dotenv
 
 # Set up Discord intents
@@ -22,7 +21,8 @@ loop_modes = {}
 
 # Load environment variables
 load_dotenv()
-TOKEN = os.environ.get('DISCORD_TOKEN')  # Use .get() to safely handle missing token
+TOKEN = os.environ.get('DISCORD_TOKEN')
+PO_TOKEN = os.environ.get('PO_TOKEN')  # Optional: Add PO_TOKEN to .env if needed
 
 # Cookies file setup
 COOKIES_FILE = 'cookies.txt'
@@ -30,6 +30,8 @@ if os.path.exists(COOKIES_FILE):
     print(f"Found {COOKIES_FILE} - cookies will be used for authentication.")
 else:
     print(f"Warning: {COOKIES_FILE} not found in {os.getcwd()}. Restricted videos may fail.")
+if PO_TOKEN:
+    print(f"PO Token found in environment variables - will be used for authentication.")
 
 @bot.event
 async def on_ready():
@@ -43,12 +45,16 @@ async def extract_info(url):
         'quiet': True,
         'noplaylist': False,
         'default_search': 'auto',
-        'extract_flat': 'in_playlist',  # For faster playlist processing
+        'extract_flat': 'in_playlist',
         'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
     }
+    if PO_TOKEN:
+        ydl_opts['po_token'] = PO_TOKEN
+
     try:
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            print(f"Extracting info for: {url} with cookies from {COOKIES_FILE if os.path.exists(COOKIES_FILE) else 'None'}")
+            print(f"Extracting info for: {url} with cookies from {COOKIES_FILE if os.path.exists(COOKIES_FILE) else 'None'}"
+                  f"{' and PO Token' if PO_TOKEN else ''}")
             info = ydl.extract_info(url, download=False)
             if 'entries' in info and len(info['entries']) > 1:
                 return {
@@ -78,8 +84,9 @@ async def extract_info(url):
             return {
                 "error": (
                     f"Authentication required: {error_msg}. "
-                    f"Ensure a valid {COOKIES_FILE} is in {os.getcwd()}. "
-                    "See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp for details."
+                    f"Ensure a valid {COOKIES_FILE} is in {os.getcwd()} and contains up-to-date YouTube cookies. "
+                    "You may also need a PO Token (see https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide). "
+                    "For cookies, see https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
                 )
             }
         raise e
@@ -127,6 +134,8 @@ async def play_next(guild_id):
                 'noplaylist': True,
                 'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
             }
+            if PO_TOKEN:
+                ydl_opts['po_token'] = PO_TOKEN
             try:
                 with youtube_dl.YoutubeDL(ydl_opts) as ydl:
                     print(f"Fetching direct URL for: {song['url']}")
@@ -139,8 +148,9 @@ async def play_next(guild_id):
                 if "Sign in to confirm" in error_msg or "cookies" in error_msg:
                     if hasattr(voice_client, 'text_channel'):
                         await voice_client.text_channel.send(
-                            f"Error: {error_msg}. Ensure a valid {COOKIES_FILE} is in {os.getcwd()}. "
-                            "See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
+                            f"Error: {error_msg}. Ensure a valid {COOKIES_FILE} is in {os.getcwd()} and up-to-date. "
+                            "A PO Token may also be required (see https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide). "
+                            "For cookies, seeUnity https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
                         )
                 return
 
@@ -196,7 +206,7 @@ async def play_music(ctx, url, queue_if_playing=False):
             voice_client = await channel.connect()
             print(f"Connected to voice channel {channel.name} in guild {ctx.guild.id}")
         elif voice_client.channel != channel:
-            await voice_client.move_to(channel)  # Fixed typo: removed 'Sergio'
+            await voice_client.move_to(channel)
             print(f"Moved to voice channel {channel.name} in guild {ctx.guild.id}")
 
         voice_clients[ctx.guild.id] = voice_client
@@ -440,9 +450,6 @@ async def commands_list(ctx):
 
 # Ensure the help command is removed
 bot.remove_command('help')
-
-# Keep the bot alive (for hosting platforms like Replit)
-webserver.keep_alive()
 
 # Run the bot
 if TOKEN:
