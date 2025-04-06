@@ -1,16 +1,11 @@
 services:
-  - type: worker
+  - type: web
     name: discord-music-bot
     env: python
-    repo: <your-repo-url>
-    buildCommand: |
-      apt-get update && apt-get install -y ffmpeg
-      pip install -r requirements.txt
-    startCommand: python main.py
+    runtime: python-3.9  # Specify the Python runtime version
+    plan: free
+    buildCommand: "pip install -r requirements.txt && apt-get update && apt-get install -y ffmpeg"
+    startCommand: "python main.py"
     envVars:
       - key: DISCORD_TOKEN
-        sync: false
-    disks:
-      - name: data
-        mountPath: /data
-        sizeGB: 1
+        sync: false  # Set this manually in Render dashboard
