@@ -33,13 +33,20 @@ async def on_ready():
 
 async def extract_info(url):
     """Extract information from a YouTube URL or search query."""
+
+    # Path to the cookies.txt file on your server
+    cookies_file_path = '/home/ec2-user/discBot/cookies.txt'  # Adjust as needed
+
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
         'noplaylist': False,
         'default_search': 'auto',
         'extract_flat': 'in_playlist',  # For faster playlist processing
+        'cookies': cookies_file_path,  # Add the cookies.txt file for authentication
     }
+
+    # Use yt-dlp to extract the video/playlist information
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
