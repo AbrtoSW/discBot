@@ -25,25 +25,10 @@ load_dotenv()
 
 TOKEN = os.environ['DISCORD_TOKEN']
 
-
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="!help"))
-
-cookies_path = '/app/cookies.txt'
-if not os.path.exists(cookies_path) and os.getenv('YOUTUBE_COOKIES'):
-    with open(cookies_path, 'w') as f:
-        f.write(os.getenv('YOUTUBE_COOKIES').replace('\t', '\n'))  # Restore newlines
-
-ydl_opts = {
-    'format': 'bestaudio/best',
-    'quiet': True,
-    'noplaylist': False,  # or True in play_next
-    'default_search': 'auto',
-    'extract_flat': 'in_playlist',
-    'cookiefile': cookies_path,
-}
 
 
 async def extract_info(url):
@@ -51,11 +36,9 @@ async def extract_info(url):
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
-        'noplaylist': False,  # or True in play_next
+        'noplaylist': False,
         'default_search': 'auto',
-        'extract_flat': 'in_playlist',
-        'cookiefile': cookies_path,
-        'retries': 5,  # Retry up to 5 times on failure
+        'extract_flat': 'in_playlist',  # For faster playlist processing
     }
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -86,8 +69,6 @@ async def extract_info(url):
 
 
 async def play_next(guild_id):
-
-
     """Play the next song in the queue or repeat based on loop mode."""
     voice_client = voice_clients.get(guild_id)
     if not voice_client:
@@ -123,16 +104,13 @@ async def play_next(guild_id):
     song = music_queues[guild_id].popleft()
     now_playing[guild_id] = song
 
+
     if 'direct_url' not in song:
         if "youtube.com" in song['url'] or "youtu.be" in song['url']:
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'quiet': True,
-                'noplaylist': False,  # or True in play_next
-                'default_search': 'auto',
-                'extract_flat': 'in_playlist',
-                'cookiefile': cookies_path,
-                'retries': 5,  # Retry up to 5 times on failure
+                'noplaylist': True
             }
             with youtube_dl.YoutubeDL(ydl_opts) as ydl:
                 song_info = ydl.extract_info(song['url'], download=False)
