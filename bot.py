@@ -38,7 +38,8 @@ async def extract_info(url):
         'quiet': True,
         'noplaylist': False,
         'default_search': 'auto',
-        'extract_flat': 'in_playlist',  # For faster playlist processing
+        'extract_flat': 'in_playlist',
+        'cookiefile': '/app/cookies.txt',  # Absolute path in Render
     }
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -104,13 +105,13 @@ async def play_next(guild_id):
     song = music_queues[guild_id].popleft()
     now_playing[guild_id] = song
 
-
     if 'direct_url' not in song:
         if "youtube.com" in song['url'] or "youtu.be" in song['url']:
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'quiet': True,
-                'noplaylist': True
+                'noplaylist': True,
+                'cookiefile': '/app/cookies.txt',  # Absolute path in Render
             }
             with youtube_dl.YoutubeDL(ydl_opts) as ydl:
                 song_info = ydl.extract_info(song['url'], download=False)
